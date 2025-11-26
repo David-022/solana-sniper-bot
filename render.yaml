@@ -1,0 +1,29 @@
+services:
+  - type: worker
+    name: solana-sniper-bot
+    env: python
+    plan: free
+    region: oregon
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 automated_sniper_bot.py
+
+    autoDeploy: true
+
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_IDS
+        sync: false
+      - key: MIN_MARKET_CAP
+        value: 10000
+      - key: MAX_MARKET_CAP
+        value: 2000000
+      - key: MIN_LIQUIDITY
+        value: 5000
+      - key: MIN_VOLUME
+        value: 1000
+      - key: QUIET_THRESHOLD
+        value: 70
+      - key: MAX_API_FAILURES
+        value: 5
