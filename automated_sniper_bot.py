@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-Optimized single-file Sniper Bot (combined)
-- OOP structure (SniperBot, TokenAnalyzer, TelegramClient, Scheduler)
-- Keeps all features you asked for: profile-based Dexscreener client, auto-refresh, 10-min interval,
-  scheduled window (21:30 - 00:30), random 5-10min delay between cycles, trending detection,
-  volume-spike detection, liquidity-drain warning, night summary, quiet-hours mode,
-  /stats and /top Telegram commands, auto-stop on repeated API failures, and --test mode.
-
-USAGE:
-- Install deps: pip install dexscreener requests urllib3
-- Put TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_IDS (comma-separated) in environment variables
-- Run: python3 automated_sniper_bot.py [--test]
-
-NOTE: Do NOT store private keys/secrets in code. Use environment variables.
-"""
-
 import os
 import sys
 import time
@@ -67,7 +50,7 @@ TREND_THRESHOLD = float(os.environ.get("TREND_THRESHOLD", 0.25))
 
 # Telegram env
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_IDS =  os.environ.get("TELEGRAM_CHAT_ID", "")
+TELEGRAM_CHAT_IDS =  TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
 
 # Dexscreener token endpoint
 DEXS_TOKEN_ENDPOINT = os.environ.get("DEXS_TOKEN_ENDPOINT", "https://api.dexscreener.com/tokens/v1/solana/{}")
