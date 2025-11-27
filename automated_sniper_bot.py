@@ -37,7 +37,7 @@ MAX_MARKET_CAP = float(os.environ.get("MAX_MARKET_CAP", 2000000))
 MIN_LIQUIDITY = float(os.environ.get("MIN_LIQUIDITY", 5000))
 MIN_VOLUME = float(os.environ.get("MIN_VOLUME", 1000))
 MIN_AGE_MINUTES = int(os.environ.get("MIN_AGE_MINUTES", 30))
-MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", 7200))
+MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", 120))
 
 # Quiet hours: only very strong alerts
 QUIET_HOURS_START = dt_time(23, 0)   # 23:00
