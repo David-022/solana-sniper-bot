@@ -4,13 +4,19 @@ import time
 import logging
 import random
 import csv
+import threading
 from datetime import datetime, time as dt_time
 from typing import List, Dict, Any, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# Dexscreener client (user must have this available)
 from dexscreener import DexscreenerClient
+
+# Flask for dummy HTTP server (so Render Web Service free works)
+from flask import Flask
 
 # -------------------------
 # Logging
@@ -26,10 +32,10 @@ SLEEP_BETWEEN_TOKENS = float(os.environ.get("SLEEP_BETWEEN_TOKENS", 0.8))
 MAX_TOP_RESULTS = int(os.environ.get("MAX_TOP_RESULTS", 5))
 OUTPUT_CSV = os.environ.get("OUTPUT_CSV", "top_tokens.csv")
 
-MIN_MARKET_CAP = float(os.environ.get("MIN_MARKET_CAP", 10000))
-MAX_MARKET_CAP = float(os.environ.get("MAX_MARKET_CAP", 2000000))
-MIN_LIQUIDITY = float(os.environ.get("MIN_LIQUIDITY", 5000))
-MIN_VOLUME = float(os.environ.get("MIN_VOLUME", 1000))
+MIN_MARKET_CAP = float(os.environ.get("MIN_MARKET_CAP", 10_000))
+MAX_MARKET_CAP = float(os.environ.get("MAX_MARKET_CAP", 2_000_000))
+MIN_LIQUIDITY = float(os.environ.get("MIN_LIQUIDITY", 5_000))
+MIN_VOLUME = float(os.environ.get("MIN_VOLUME", 1_000))
 MIN_AGE_MINUTES = int(os.environ.get("MIN_AGE_MINUTES", 30))
 MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", 7200))
 
@@ -50,7 +56,7 @@ TREND_THRESHOLD = float(os.environ.get("TREND_THRESHOLD", 0.25))
 
 # Telegram env
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_IDS =  TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
+TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
 
 # Dexscreener token endpoint
 DEXS_TOKEN_ENDPOINT = os.environ.get("DEXS_TOKEN_ENDPOINT", "https://api.dexscreener.com/tokens/v1/solana/{}")
@@ -77,7 +83,6 @@ session = make_session()
 # -------------------------
 # Helpers
 # -------------------------
-
 def safe_float(x: Any, default: float = 0.0) -> float:
     try:
         if x is None or x == "":
@@ -86,20 +91,17 @@ def safe_float(x: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
-
 def safe_int(x: Any, default: int = 0) -> int:
     try:
         return int(x)
     except Exception:
         return default
 
-
 def safe_div(a: float, b: float, default: float = 0.0) -> float:
     try:
         return a / b if b else default
     except Exception:
         return default
-
 
 def token_age_minutes(timestamp: Optional[int]) -> int:
     if not timestamp:
@@ -115,6 +117,21 @@ def token_age_minutes(timestamp: Optional[int]) -> int:
     elif ts > 10_000_000_000:
         ts //= 1000
     return max(0, (now_s - ts) // 60)
+
+# -------------------------
+# Flask dummy HTTP server for Render free web service
+# -------------------------
+def start_dummy_http_server():
+    app = Flask(__name__)
+
+    @app.route("/")
+    def home():
+        return "Sniper bot is running."
+
+    # Render provides a PORT environment variable for Web Services.
+    port = int(os.environ.get("PORT", 10000))
+    # Run Flask (will block if not in thread)
+    app.run(host="0.0.0.0", port=port)
 
 # -------------------------
 # Telegram client
@@ -221,7 +238,7 @@ class TokenAnalyzer:
             return None
 
 # -------------------------
-# Utilities: CSV
+# CSV Logger
 # -------------------------
 class CSVLogger:
     def __init__(self, path: str):
@@ -309,9 +326,11 @@ class SniperBot:
 
         for p in profiles:
             try:
-                if p.chain_id != "solana":
+                if getattr(p, "chain_id", None) != "solana" and p.get("chain_id", None) != "solana":
                     continue
-                addr = p.token_address
+                addr = getattr(p, "token_address", None) or p.get("token_address", None)
+                if not addr:
+                    continue
                 detail = self.fetch_token_detail(addr)
                 if not detail:
                     continue
@@ -364,15 +383,15 @@ class SniperBot:
         best = max(s["top_tokens"], key=lambda x: x["momentum"]) if s["top_tokens"] else None
         trending = max(s["trending_tokens"], key=lambda x: x["momentum"]) if s["trending_tokens"] else None
         summary = (
-            f"🌙 *Night Session Summary (9:30 PM → 12:30 AM)*"
-            f"🔁 Cycles Completed: *{s['cycles']}*"
-            f"📊 Tokens Scanned: *{s['tokens_scanned']}*"
-            f"📈 Avg Momentum: *{avg:.2f}*"
+            f"🌙 *Night Session Summary (9:30 PM → 12:30 AM)*\n"
+            f"🔁 Cycles Completed: *{s['cycles']}*\n"
+            f"📊 Tokens Scanned: *{s['tokens_scanned']}*\n"
+            f"📈 Avg Momentum: *{avg:.2f}*\n\n"
         )
         if best:
-            summary += f"🏆 *Best Performer:* {best['name']} — {best['momentum']:.2f}"
+            summary += f"🏆 *Best Performer:* {best['name']} — {best['momentum']:.2f}\n"
         if trending:
-            summary += f"🔥 *Most Trending:* {trending['name']} — {trending['momentum']:.2f}"
+            summary += f"🔥 *Most Trending:* {trending['name']} — {trending['momentum']:.2f}\n"
         self.telegram.send_message(summary)
 
     def handle_telegram_commands(self) -> None:
@@ -390,10 +409,10 @@ class SniperBot:
                 avg = (sum(s["momentum_values"]) / len(s["momentum_values"])) if s["momentum_values"] else 0
                 best_name = max(s["top_tokens"], key=lambda x: x["momentum"])['name'] if s["top_tokens"] else 'N/A'
                 out = (
-                    f"📊 *Night Stats So Far:*"
-                    f"🔁 Cycles: {s['cycles']}"
-                    f"📈 Avg Momentum: {avg:.2f}"
-                    f"🔥 Trending Tokens: {len(s['trending_tokens'])}"
+                    f"📊 *Night Stats So Far:*\n"
+                    f"🔁 Cycles: {s['cycles']}\n"
+                    f"📈 Avg Momentum: {avg:.2f}\n"
+                    f"🔥 Trending Tokens: {len(s['trending_tokens'])}\n"
                     f"🏆 Best Token So Far: {best_name}"
                 )
                 self.telegram.send_message(out)
@@ -402,9 +421,9 @@ class SniperBot:
                     self.telegram.send_message("No tokens scanned yet.")
                     continue
                 top_now = sorted(self.night_stats["top_tokens"], key=lambda x: x["momentum"], reverse=True)[:3]
-                resp = "🏆 *Top Tokens Right Now*"
+                resp = "🏆 *Top Tokens Right Now*\n"
                 for t in top_now:
-                    resp += f"• {t['name']} — {t['momentum']:.2f}"
+                    resp += f"• {t['name']} — {t['momentum']:.2f}\n"
                 self.telegram.send_message(resp)
 
     def run_cycle(self, test_mode: bool = False) -> None:
@@ -446,22 +465,22 @@ class SniperBot:
             # Build message
             if liquidity_rug:
                 emoji = "🚨"
-                extra = "⚠️ *Liquidity Drain Detected — Possible Rug!*"
+                extra = "\n⚠️ *Liquidity Drain Detected — Possible Rug!*"
             elif volume_spike:
                 emoji = "💥"
-                extra = "📈 *Volume Spike Detected!*"
+                extra = "\n📈 *Volume Spike Detected!*"
             elif trending:
                 emoji = "🔥"
-                extra = "🚀 *Trending Up!*"
+                extra = "\n🚀 *Trending Up!*"
             else:
                 emoji = "🪙"
                 extra = ""
 
             msg = (
-                f"{emoji} *#{idx} — {token.get('name')}* ({token.get('symbol')})"
-                f"💵 ${token.get('price',0):.6f} | MC: ${token.get('market_cap',0):,}"
-                f"💧 LQ: ${token.get('liquidity',0):,} | ⚡ Momentum: {new_score:.2f}"
-                f"📈 Change: {token.get('price_change',0):.2f}% | ⏱ Age: {token.get('age')} mins"
+                f"{emoji} *#{idx} — {token.get('name')}* ({token.get('symbol')})\n"
+                f"💵 ${token.get('price',0):.6f} | MC: ${token.get('market_cap',0):,}\n"
+                f"💧 LQ: ${token.get('liquidity',0):,} | ⚡ Momentum: {new_score:.2f}\n"
+                f"📈 Change: {token.get('price_change',0):.2f}% | ⏱ Age: {token.get('age')} mins\n"
                 f"🔗 [Dexscreener]({token.get('url')}){extra}"
             )
             self.telegram.send_message(msg)
@@ -470,6 +489,7 @@ class SniperBot:
         logger.info("SniperBot starting. Scheduled window: 21:30 -> 00:30.")
         try:
             while True:
+                # Poll Telegram commands every cycle
                 self.handle_telegram_commands()
 
                 if self.in_trading_window():
@@ -477,10 +497,10 @@ class SniperBot:
                         # start of session
                         self.session_active = True
                         self.api_failures = 0
-                        self.night_stats = {"cycles":0, "tokens_scanned":0, "momentum_values":[], "top_tokens":[], "trending_tokens":[]} 
+                        self.night_stats = {"cycles":0, "tokens_scanned":0, "momentum_values":[], "top_tokens":[], "trending_tokens":[]}
                         start_msg = (
-                            "📣 *Sniper Session Started*"
-                            "🕤 Window: *9:30 PM → 12:30 AM*"
+                            "📣 *Sniper Session Started*\n"
+                            "🕤 Window: *9:30 PM → 12:30 AM*\n"
                             "🔍 Beginning scan cycles..."
                         )
                         self.telegram.send_message(start_msg)
@@ -501,7 +521,7 @@ class SniperBot:
                         return
 
                     # random 5-10 minute pause
-                    delay = 600
+                    delay = random.randint(300, 600)
                     logger.info(f"Sleeping for {delay//60} minutes...")
                     time.sleep(delay)
 
@@ -509,7 +529,7 @@ class SniperBot:
                     # session end
                     if self.session_active:
                         self.send_night_summary()
-                        end_msg = ("📴 *Sniper Session Ended*" "🕛 Time: 12:30 AM" "📉 Scanning paused until tomorrow.")
+                        end_msg = ("📴 *Sniper Session Ended*\n" "🕛 Time: 12:30 AM\n" "📉 Scanning paused until tomorrow.")
                         self.telegram.send_message(end_msg)
                         self.session_active = False
                         logger.info("Session ended")
@@ -524,16 +544,21 @@ class SniperBot:
 # -------------------------
 # Entrypoint
 # -------------------------
-
 def main():
     test_mode = "--test" in sys.argv
+
+    # Start dummy Flask HTTP server in background thread (for Render web service)
+    threading.Thread(target=start_dummy_http_server, daemon=True).start()
+    logger.info("Started dummy Flask HTTP server thread (for Render port binding).")
+
     # build clients
     telegram = TelegramClient(TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS, session)
     analyzer = TokenAnalyzer()
     csv_logger = CSVLogger(OUTPUT_CSV)
     bot = SniperBot(telegram, analyzer, csv_logger)
-    bot.run(test_mode=test_mode)
 
+    # Run the bot (blocks)
+    bot.run(test_mode=test_mode)
 
 if __name__ == "__main__":
     main()
