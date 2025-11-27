@@ -32,16 +32,16 @@ SLEEP_BETWEEN_TOKENS = float(os.environ.get("SLEEP_BETWEEN_TOKENS", 0.8))
 MAX_TOP_RESULTS = int(os.environ.get("MAX_TOP_RESULTS", 5))
 OUTPUT_CSV = os.environ.get("OUTPUT_CSV", "top_tokens.csv")
 
-MIN_MARKET_CAP = float(os.environ.get("MIN_MARKET_CAP", 10_000))
-MAX_MARKET_CAP = float(os.environ.get("MAX_MARKET_CAP", 2_000_000))
-MIN_LIQUIDITY = float(os.environ.get("MIN_LIQUIDITY", 5_000))
-MIN_VOLUME = float(os.environ.get("MIN_VOLUME", 1_000))
+MIN_MARKET_CAP = float(os.environ.get("MIN_MARKET_CAP", 10000))
+MAX_MARKET_CAP = float(os.environ.get("MAX_MARKET_CAP", 2000000))
+MIN_LIQUIDITY = float(os.environ.get("MIN_LIQUIDITY", 5000))
+MIN_VOLUME = float(os.environ.get("MIN_VOLUME", 1000))
 MIN_AGE_MINUTES = int(os.environ.get("MIN_AGE_MINUTES", 30))
 MAX_AGE_MINUTES = int(os.environ.get("MAX_AGE_MINUTES", 7200))
 
 # Quiet hours: only very strong alerts
-QUIET_HOURS_START = dt_time(0, 0)   # 00:00
-QUIET_HOURS_END = dt_time(0, 30)    # 00:30
+QUIET_HOURS_START = dt_time(23, 0)   # 23:00
+QUIET_HOURS_END = dt_time(23, 30)    # 23:30
 QUIET_THRESHOLD = float(os.environ.get("QUIET_THRESHOLD", 70.0))
 
 # API failure protection
@@ -62,8 +62,8 @@ TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").
 DEXS_TOKEN_ENDPOINT = os.environ.get("DEXS_TOKEN_ENDPOINT", "https://api.dexscreener.com/tokens/v1/solana/{}")
 
 # Trading window
-WINDOW_START = dt_time(21, 30)  # 21:30
-WINDOW_END = dt_time(0, 30)     # 00:30 next day
+WINDOW_START = dt_time(20, 30)  # 20:30
+WINDOW_END = dt_time(23, 30)     # 00:30 next day
 
 # -------------------------
 # HTTP session with retries
@@ -112,9 +112,9 @@ def token_age_minutes(timestamp: Optional[int]) -> int:
         return 1440
     now_s = int(time.time())
     # detect ms vs s
-    if ts > 1_000_000_000_000:
+    if ts > 1000000000000:
         ts //= 1000
-    elif ts > 10_000_000_000:
+    elif ts > 10000000000:
         ts //= 1000
     return max(0, (now_s - ts) // 60)
 
