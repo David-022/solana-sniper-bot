@@ -5,7 +5,7 @@ services:
     region: oregon
     plan: free
     buildCommand: ""
-    startCommand: "python3 meme_sniper_alert_fixed.py"
+    startCommand: "python3 automated_sniper_bot.py"
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
