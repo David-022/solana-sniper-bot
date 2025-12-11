@@ -61,11 +61,12 @@ session = make_session()
 
 
 # ---------------------------
-# Telegram Sending
+# Telegram env (CLEANED)
 # ---------------------------
-‎# Telegram env
-‎TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-‎TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
+import os
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
+
 
 def send_telegram(text: str):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_IDS:
@@ -121,7 +122,7 @@ def token_age_minutes(ts):
 
     now = int(time.time())
     # ms → s
-    if ts > 10000000000:
+    if ts > 10_000_000_000:
         ts //= 1000
     return max(0, (now - ts) // 60)
 
@@ -139,8 +140,7 @@ def fetch_token_detail(addr):
 
 def analyze_token(data):
     """
-    This is exactly how your original logic behaved.
-    Nothing extra added.
+    Your original token analysis logic.
     """
     try:
         if isinstance(data, list):
@@ -168,7 +168,6 @@ def analyze_token(data):
         if age < 30 or age > 120:
             return None
 
-        # Original momentum formula
         momentum = (
             price_change * 0.4 +
             (safe_div(volume, market_cap) * 100) * 0.3 +
@@ -194,10 +193,6 @@ def analyze_token(data):
 
 
 def run_sniper_cycle():
-    """
-    EXACTLY your original scanning → analyzing → alerting logic,
-    with nothing changed inside.
-    """
     logger.info("Running sniper scan...")
 
     try:
@@ -253,10 +248,10 @@ def run_sniper_cycle():
 
 
 # ---------------------------
-# SCHEDULER (THIS IS THE ONLY ADDITION)
+# SCHEDULER
 # ---------------------------
-WINDOW_START = dtime(20, 30)  # 20:30 UTC = 21:30 Nigeria
-WINDOW_END = dtime(23, 30)    # 23:30 UTC = 00:30 Nigeria
+WINDOW_START = dtime(20, 30)   # 20:30 UTC → 21:30 Nigerian
+WINDOW_END = dtime(23, 30)     # 23:30 UTC → 00:30 Nigerian
 
 
 def in_window():
@@ -270,25 +265,19 @@ def scheduler_loop():
     while True:
         if in_window():
             run_sniper_cycle()
-
-            # Sleep 5–10 minutes between cycles (same as original logic style)
-            #delay = random.randint(300, 600)
-            delay = 600
-            logger.info(f"Sleeping {delay//60} minutes until next cycle...")
+            delay = 600  # 10 minutes
+            logger.info(f"Sleeping {delay//60} minutes...")
             time.sleep(delay)
         else:
-            logger.info("Outside active window. Sleeping 5 minutes...")
+            logger.info("Outside window. Sleeping 5 min...")
             time.sleep(300)
 
 
-# ---------------------------
-# MAIN
-# ---------------------------
 def main():
-    # Start flask as background thread
+    # Start flask (Render keep-alive)
     threading.Thread(target=start_flask, daemon=True).start()
 
-    # Start scheduler loop (blocking)
+    # Start scanning scheduler
     scheduler_loop()
 
 
