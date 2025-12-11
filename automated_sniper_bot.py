@@ -253,7 +253,7 @@ def run_sniper_cycle():
 
 
 # ---------------------------
-# SCHEDULER 
+# SCHEDULER (THIS IS THE ONLY ADDITION)
 # ---------------------------
 WINDOW_START = dtime(20, 30)  # 20:30 UTC = 21:30 Nigeria
 WINDOW_END = dtime(23, 30)    # 23:30 UTC = 00:30 Nigeria
@@ -272,7 +272,8 @@ def scheduler_loop():
             run_sniper_cycle()
 
             # Sleep 5–10 minutes between cycles (same as original logic style)
-            delay = random.randint(300, 600)
+            #delay = random.randint(300, 600)
+            delay = 600
             logger.info(f"Sleeping {delay//60} minutes until next cycle...")
             time.sleep(delay)
         else:
