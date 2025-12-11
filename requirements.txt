@@ -1,4 +1,4 @@
+flask
 requests
 urllib3
 dexscreener
-flask
