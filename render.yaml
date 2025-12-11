@@ -2,63 +2,15 @@ services:
   - type: web
     name: solana-sniper-bot
     env: python
-    plan: free
     region: oregon
-
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
-
-    startCommand: |
-      python3 automated_sniper_bot.py
-
-    autoDeploy: true
-
+    plan: free
+    buildCommand: ""
+    startCommand: "python3 meme_sniper_alert_fixed.py"
     envVars:
-      - key: PORT
-        value: 10000
-
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-
       - key: TELEGRAM_CHAT_IDS
         sync: false
-
-      - key: MIN_MARKET_CAP
+      - key: PORT
         value: "10000"
-
-      - key: MAX_MARKET_CAP
-        value: "2000000"
-
-      - key: MIN_LIQUIDITY
-        value: "5000"
-
-      - key: MIN_VOLUME
-        value: "1000"
-
-      - key: QUIET_THRESHOLD
-        value: "70"
-
-      - key: MAX_API_FAILURES
-        value: "5"
-
-      - key: REFRESH_INTERVAL
-        value: "600"
-
-      - key: SLEEP_BETWEEN_TOKENS
-        value: "0.8"
-
-      - key: VOLUME_SPIKE_MULTIPLIER
-        value: "2.0"
-
-      - key: LIQUIDITY_DRAIN_PERCENT
-        value: "0.25"
-
-      - key: MAX_TOP_RESULTS
-        value: "5"
-
-      - key: OUTPUT_CSV
-        value: "top_tokens.csv"
-
-      - key: DEXS_TOKEN_ENDPOINT
-        value: "https://api.dexscreener.com/tokens/v1/solana/{}"
+    autoDeploy: true
