@@ -245,7 +245,6 @@ def run_sniper_cycle():
         if not results:
             logging.info("No valid tokens found this round.")
         else:
-            save_results_to_csv(results)
             logging.info(f"✅ Found {len(results)} high-momentum tokens. Sending alerts...")
 
             for idx, token in enumerate(results, 1):
