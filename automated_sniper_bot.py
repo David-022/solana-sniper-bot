@@ -232,49 +232,51 @@ def fetch_and_analyze():
 def run_sniper_cycle():
     global previous_scores
     test_mode = "--test" in sys.argv
-    #test_mode = "True"
     
     if test_mode:
         logging.info("🧪 Running MemeBotTelegramAlart in TEST MODE (one cycle only).")
     else:
-        logging.info("🚀 MemeBotTelegramAlart Lite started — 10-min refresh, no chart mode.")
+        logging.info("🚀 MemeBotTelegramAlart Lite started — single cycle, no loop.")
 
-    while True:
-        results = fetch_and_analyze()
+    results = fetch_and_analyze()
 
-        if not results:
-            logging.info("No valid tokens found this round.")
-        else:
-            logging.info(f"✅ Found {len(results)} high-momentum tokens. Sending alerts...")
+    if not results:
+        logging.info("No valid tokens found this round.")
+        return
 
-            for idx, token in enumerate(results, 1):
-                name, symbol = token["name"], token["symbol"]
-                address = token["url"].split("/")[-1] if token["url"] else symbol
+    logging.info(f"✅ Found {len(results)} high-momentum tokens. Sending alerts...")
 
-                old_score = previous_scores.get(address, 0)
-                new_score = token["momentum"]
-                trending = (old_score == 0 and new_score > 0) or (
-                    old_score > 0 and (new_score - old_score) / max(old_score, 1) >= TREND_THRESHOLD
-                )
-                previous_scores[address] = new_score
+    for idx, token in enumerate(results, 1):
+        name, symbol = token["name"], token["symbol"]
+        address = token["url"].split("/")[-1] if token["url"] else symbol
 
-                emoji = "🔥" if trending else "🪙"
-                msg = (
-                    f"{emoji} *#{idx} — {name}* ({symbol})\n"
-                    f"💵 ${token['price']:.6f} | MC: ${token['market_cap']:,} | Vol: ${token['volume']:,}\n"
-                    f"💧 LQ: ${token['liquidity']:,} | ⚡ Momentum: {new_score:.2f}\n"
-                    f"📈 Change: {token['price_change']:.2f}% | ⏱ Age: {token['age']} mins\n"
-                    f"🔗 [Dexscreener]({token['url']})"
-                )
-                if trending:
-                    msg += "\n🚀 *Trending Up!* Momentum rising fast!"
-                if token["twitter"]:
-                    msg += f"\n🐦 [Twitter]({token['twitter']})"
-                if token["telegram"]:
-                    msg += f"\n💬 [Telegram]({token['telegram']})"
+        old_score = previous_scores.get(address, 0)
+        new_score = token["momentum"]
 
-                send_telegram_alert(msg)
-                break
+        trending = (
+            (old_score == 0 and new_score > 0) or
+            (old_score > 0 and (new_score - old_score) / max(old_score, 1) >= TREND_THRESHOLD)
+        )
+
+        previous_scores[address] = new_score
+
+        emoji = "🔥" if trending else "🪙"
+        msg = (
+            f"{emoji} *#{idx} — {name}* ({symbol})\n"
+            f"💵 ${token['price']:.6f} | MC: ${token['market_cap']:,} | Vol: ${token['volume']:,}\n"
+            f"💧 LQ: ${token['liquidity']:,} | ⚡ Momentum: {new_score:.2f}\n"
+            f"📈 Change: {token['price_change']:.2f}% | ⏱ Age: {token['age']} mins\n"
+            f"🔗 [Dexscreener]({token['url']})"
+        )
+
+        if trending:
+            msg += "\n🚀 *Trending Up!* Momentum rising fast!"
+        if token["twitter"]:
+            msg += f"\n🐦 [Twitter]({token['twitter']})"
+        if token["telegram"]:
+            msg += f"\n💬 [Telegram]({token['telegram']})"
+
+        send_telegram_alert(msg)
     		        
     		         
     		         
