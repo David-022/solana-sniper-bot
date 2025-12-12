@@ -1,23 +1,18 @@
+import sys
 import time
 import logging
-import random
-import threading
-from datetime import datetime, time as dtime
-
 import requests
+import csv
+from dexscreener import DexscreenerClient
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from dexscreener import DexscreenerClient
-
+from datetime import datetime, time as dtime
 from flask import Flask
 
-# ---------------------------
-# Logging
-# ---------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
-)
+# --------------------------------------------
+# --- Logging
+# --------------------------------------------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger("meme_sniper")
 
 # ---------------------------
@@ -28,8 +23,7 @@ app = Flask(__name__)
 @app.route("/")
 def root():
     return "OK"
-
-
+    
 def start_flask():
     """
     Starts Flask in a background thread so Render stays alive.
@@ -37,28 +31,21 @@ def start_flask():
     import os
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
 
+# --------------------------------------------
+# --- Configuration
+# --------------------------------------------
+REFRESH_INTERVAL = 600  # 10 minutes (in seconds)
+SLEEP_BETWEEN_TOKENS = 0.8
+MAX_TOP_RESULTS = 5
 
-# ---------------------------
-# HTTP session with retries
-# ---------------------------
-def make_session():
-    s = requests.Session()
-    retry = Retry(
-        total=3,
-        backoff_factor=0.3,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST"]
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    s.mount("https://", adapter)
-    s.mount("http://", adapter)
-    s.request_timeout = 7
-    return s
-
-
-session = make_session()
-
+MIN_MARKET_CAP = 10000
+MAX_MARKET_CAP = 2000000
+MIN_LIQUIDITY = 5000
+MIN_VOLUME = 1000
+MIN_AGE_MINUTES = 30
+MAX_AGE_MINUTES = 120
 
 # ---------------------------
 # Telegram env (CLEANED)
@@ -67,113 +54,127 @@ import os
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_IDS = [p.strip() for p in os.environ.get("TELEGRAM_CHAT_IDS", "").split(",") if p.strip()]
 
+DEXS_TOKEN_ENDPOINT = "https://api.dexscreener.com/tokens/v1/solana/{}"
 
-def send_telegram(text: str):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_IDS:
-        logger.info("Telegram not configured.")
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    payload = {
-        "text": text,
-        "parse_mode": "Markdown"
-    }
-
-    for cid in TELEGRAM_CHAT_IDS:
-        payload["chat_id"] = cid
-        try:
-            r = session.post(url, json=payload, timeout=7)
-            if r.status_code != 200:
-                logger.warning(f"Telegram send failed for {cid}: {r.text}")
-        except Exception as e:
-            logger.warning(f"Telegram error: {e}")
+# --- Trending settings ---
+previous_scores = {}
+TREND_THRESHOLD = 0.25  # 25% increase considered trending
 
 
-# ---------------------------
-# Dexscreener client
-# ---------------------------
-client = DexscreenerClient()
+# --------------------------------------------
+# --- HTTP Session with Retry
+# --------------------------------------------
+def make_session(retries=3, backoff=0.4, timeout=6):
+    s = requests.Session()
+    retry = Retry(
+        total=retries,
+        backoff_factor=backoff,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    s.request_timeout = timeout
+    return s
 
+session = make_session()
 
-def safe_float(x):
+# --------------------------------------------
+# --- Safe helpers
+# --------------------------------------------
+def safe_float(x, default=0.0):
     try:
-        if x is None or x == "":
-            return 0.0
         return float(x)
-    except:
-        return 0.0
+    except Exception:
+        return default
 
+def safe_int(x, default=0):
+    try:
+        return int(x)
+    except Exception:
+        return default
 
 def safe_div(a, b, default=0.0):
     try:
         return a / b if b else default
-    except:
+    except Exception:
         return default
 
-
-def token_age_minutes(ts):
-    if not ts:
-        return 9999
+def simulate_token_age(timestamp):
+    if not timestamp:
+        return 1440
     try:
-        ts = int(ts)
-    except:
-        return 9999
+        ts = int(timestamp)
+        now = int(time.time())
+        if ts > 1e12:
+            ts //= 1000
+        elif ts > 1e10:
+            ts //= 1000
+        return max(0, (now - ts) // 60)
+    except Exception:
+        return 1440
+        
 
-    now = int(time.time())
-    # ms → s
-    if ts > 10_000_000_000:
-        ts //= 1000
-    return max(0, (now - ts) // 60)
+# --------------------------------------------
+# --- Telegram helpers
+# --------------------------------------------
+def send_telegram_alert(message):
+    for chat_id in TELEGRAM_CHAT_IDS:
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        try:
+            r = session.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                             json=payload, timeout=session.request_timeout)
+            if r.status_code != 200:
+                logging.warning(f"Telegram send failed ({chat_id}): {r.status_code}")
+        except Exception as e:
+            logging.warning(f"Telegram send error ({chat_id}): {e}")
+            
 
-
-def fetch_token_detail(addr):
-    url = f"https://api.dexscreener.com/tokens/v1/solana/{addr}"
-    try:
-        r = session.get(url, timeout=7)
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except:
-        return None
-
-
-def analyze_token(data):
-    """
-    Your original token analysis logic.
-    """
+# --------------------------------------------
+# --- Analytics
+# --------------------------------------------
+def analyze_token_data(data):
     try:
         if isinstance(data, list):
             data = data[0]
 
-        base = data.get("baseToken", {}) or {}
-        name = base.get("name", "unknown")
-        symbol = base.get("symbol", "")
-
+        name = data.get("baseToken", {}).get("name", "")
+        symbol = data.get("baseToken", {}).get("symbol", "")
         price = safe_float(data.get("priceUsd"))
         market_cap = safe_float(data.get("marketCap"))
-        volume = safe_float((data.get("volume") or {}).get("h24"))
-        liquidity = safe_float((data.get("liquidity") or {}).get("usd"))
-        price_change = safe_float((data.get("priceChange") or {}).get("h24"))
-        age = token_age_minutes(data.get("pairCreatedAt"))
+        volume = safe_float(data.get("volume", {}).get("h24"))
+        price_change = safe_float(data.get("priceChange", {}).get("h24"))
+        liquidity = safe_float(data.get("liquidity", {}).get("usd", 0))
+        age = simulate_token_age(data.get("pairCreatedAt"))
         url = data.get("url", "")
+        info = data.get("info", {})
 
-        # Your original filtering
-        if market_cap < 10000 or market_cap > 2000000:
+        socials = info.get("socials", [])
+        twitter = next((s.get("url") for s in socials if s.get("type") == "twitter"), "")
+        telegram = next((s.get("url") for s in socials if s.get("type") == "telegram"), "")
+
+        if not (MIN_MARKET_CAP <= market_cap <= MAX_MARKET_CAP):
             return None
-        if liquidity < 5000:
+        if volume < MIN_VOLUME or liquidity < MIN_LIQUIDITY:
             return None
-        if volume < 1000:
+        if not (MIN_AGE_MINUTES <= age <= MAX_AGE_MINUTES):
             return None
-        if age < 30 or age > 120:
+        if not twitter:
             return None
+
+        # --- Advanced analytics ---
+        liquidity_score = min(liquidity / (market_cap * 0.5 + 1), 1.0)
+        activity_ratio = safe_div(volume, market_cap, 0.0)
+        age_factor = 1.0 if age < 120 else 0.8 if age < 360 else 0.5 if age < 720 else 0.2
+        hype_score = 1.0 + (0.1 if twitter else 0) + (0.1 if telegram else 0)
 
         momentum = (
-            price_change * 0.4 +
-            (safe_div(volume, market_cap) * 100) * 0.3 +
-            (min(liquidity / (market_cap * 0.5 + 1), 1.0) * 25) * 0.2 +
-            (1 if age < 120 else 0.8 if age < 360 else 0.5) * 10 * 0.1
-        )
+            (price_change * 0.4) +
+            (activity_ratio * 100 * 0.3) +
+            (liquidity_score * 25 * 0.2) +
+            (age_factor * 10 * 0.1)
+        ) * hype_score
 
         return {
             "name": name,
@@ -185,67 +186,98 @@ def analyze_token(data):
             "price_change": price_change,
             "age": age,
             "momentum": momentum,
-            "url": url
+            "url": url,
+            "twitter": twitter,
+            "telegram": telegram,
         }
+
     except Exception as e:
-        logger.warning(f"analysis error: {e}")
+        logging.warning(f"Failed to analyze token data: {e}")
         return None
+        
+        
+# --------------------------------------------
+# --- Fetch + Analyze
+# --------------------------------------------
+def fetch_and_analyze():
+    client = DexscreenerClient()
+    profiles = client.get_latest_token_profiles()
 
-
-def run_sniper_cycle():
-    logger.info("Running sniper scan...")
-
-    try:
-        profiles = client.get_latest_token_profiles()
-    except Exception as e:
-        logger.warning(f"Error loading profiles: {e}")
-        return
-
-    valid_tokens = []
-
-    for p in profiles:
+    results = []
+    for profile in profiles:
+        if profile.chain_id != "solana":
+            continue
+        token_address = profile.token_address
         try:
-            chain = getattr(p, "chain_id", None)
-            if chain != "solana":
+            r = session.get(DEXS_TOKEN_ENDPOINT.format(token_address), timeout=session.request_timeout)
+            if r.status_code != 200:
                 continue
-
-            addr = getattr(p, "token_address", None)
-            if not addr:
-                continue
-
-            detail = fetch_token_detail(addr)
-            if not detail:
-                continue
-
-            analyzed = analyze_token(detail)
-            if analyzed:
-                valid_tokens.append(analyzed)
-
+            data = r.json()
+            result = analyze_token_data(data)
+            if result:
+                results.append(result)
         except Exception as e:
-            logger.warning(f"Profile error: {e}")
+            logging.warning(f"Error fetching token info: {e}")
+        time.sleep(SLEEP_BETWEEN_TOKENS)
 
-        time.sleep(0.6)
+    if not results:
+        return []
+    return sorted(results, key=lambda x: x["momentum"], reverse=True)[:MAX_TOP_RESULTS]
+    
 
-    if not valid_tokens:
-        logger.info("No good tokens this round.")
-        return
+# --------------------------------------------
+# --- Run Sniper Cycle
+# --------------------------------------------
+def run_sniper_cycle():
+    global previous_scores
+    test_mode = "--test" in sys.argv
+    #test_mode = "True"
+    
+    if test_mode:
+        logging.info("🧪 Running MemeBotTelegramAlart in TEST MODE (one cycle only).")
+    else:
+        logging.info("🚀 MemeBotTelegramAlart Lite started — 10-min refresh, no chart mode.")
 
-    valid_tokens.sort(key=lambda x: x["momentum"], reverse=True)
-    best = valid_tokens[0]
+    while True:
+        results = fetch_and_analyze()
 
-    msg = (
-        f"🔥 *New Token Detected!*\n"
-        f"{best['name']} ({best['symbol']})\n"
-        f"💵 ${best['price']:.6f}\n"
-        f"💧 Liquidity: ${best['liquidity']:,}\n"
-        f"💰 Market Cap: ${best['market_cap']:,}\n"
-        f"📈 24h Change: {best['price_change']:.2f}%\n"
-        f"⚡ Momentum: {best['momentum']:.2f}\n"
-        f"🔗 {best['url']}"
-    )
+        if not results:
+            logging.info("No valid tokens found this round.")
+        else:
+            logging.info(f"✅ Found {len(results)} high-momentum tokens. Sending alerts...")
 
-    send_telegram(msg)
+            for idx, token in enumerate(results, 1):
+                name, symbol = token["name"], token["symbol"]
+                address = token["url"].split("/")[-1] if token["url"] else symbol
 
+                old_score = previous_scores.get(address, 0)
+                new_score = token["momentum"]
+                trending = (old_score == 0 and new_score > 0) or (
+                    old_score > 0 and (new_score - old_score) / max(old_score, 1) >= TREND_THRESHOLD
+                )
+                previous_scores[address] = new_score
+
+                emoji = "🔥" if trending else "🪙"
+                msg = (
+                    f"{emoji} *#{idx} — {name}* ({symbol})\n"
+                    f"💵 ${token['price']:.6f} | MC: ${token['market_cap']:,} | Vol: ${token['volume']:,}\n"
+                    f"💧 LQ: ${token['liquidity']:,} | ⚡ Momentum: {new_score:.2f}\n"
+                    f"📈 Change: {token['price_change']:.2f}% | ⏱ Age: {token['age']} mins\n"
+                    f"🔗 [Dexscreener]({token['url']})"
+                )
+                if trending:
+                    msg += "\n🚀 *Trending Up!* Momentum rising fast!"
+                if token["twitter"]:
+                    msg += f"\n🐦 [Twitter]({token['twitter']})"
+                if token["telegram"]:
+                    msg += f"\n💬 [Telegram]({token['telegram']})"
+
+                send_telegram_alert(msg)
+
+        if test_mode:
+            logging.info("✅ Test round completed. Exiting.")
+            break
+            
 
 # ---------------------------
 # SCHEDULER
@@ -257,7 +289,7 @@ WINDOW_END = dtime(23, 30)     # 23:30 UTC → 00:30 Nigerian
 def in_window():
     now = datetime.now().time()
     return WINDOW_START <= now <= WINDOW_END
-
+    
 
 def scheduler_loop():
     logger.info("Sniper bot scheduler started.")
@@ -271,15 +303,16 @@ def scheduler_loop():
         else:
             logger.info("Outside window. Sleeping 5 min...")
             time.sleep(300)
-
-
+            
+            
 def main():
     # Start flask (Render keep-alive)
     threading.Thread(target=start_flask, daemon=True).start()
 
     # Start scanning scheduler
     scheduler_loop()
-
-
+    
 if __name__ == "__main__":
     main()
+
+
