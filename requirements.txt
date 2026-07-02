@@ -1,4 +1,6 @@
-flask
-requests
-urllib3
+aiogram>=3.7.0
+aiohttp
+aiosqlite
+Flask
+python-dotenv
 dexscreener
