@@ -7,9 +7,11 @@ services:
     buildCommand: ""
     startCommand: "python3 automated_sniper_bot.py"
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
+      - key: BOT_TOKEN
         sync: false
-      - key: TELEGRAM_CHAT_IDS
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ADMIN_USERNAME
         sync: false
       - key: PORT
         value: "10000"
