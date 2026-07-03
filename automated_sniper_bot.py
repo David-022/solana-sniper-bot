@@ -6,11 +6,11 @@
 import asyncio
 import logging
 import time
+import json
 import os
 
 import aiohttp
 import aiosqlite
-import threading
 
 from aiogram import (
     Bot,
@@ -79,14 +79,13 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
 
-
 DB_FILE = "crypto_scanner.db"
 
 # Scanner Settings
 
 SCAN_INTERVAL = 60
 
-MAX_TOP_RESULTS = 5
+MAX_TOP_RESULTS = 3
 
 # Filters
 
@@ -96,7 +95,7 @@ MAX_MARKET_CAP = 2000000
 MIN_VOLUME = 3000
 MIN_LIQUIDITY = 8000
 
-MIN_AGE_MINUTES = 3
+MIN_AGE_MINUTES = 5
 MAX_AGE_MINUTES = 100
 
 TREND_THRESHOLD = 0.20
@@ -107,8 +106,11 @@ TREND_THRESHOLD = 0.20
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    force=True
+    format=(
+        "%(asctime)s - "
+        "%(levelname)s - "
+        "%(message)s"
+    )
 )
 
 # =========================================================
@@ -128,7 +130,7 @@ router = Router()
 
 dp.include_router(router)
 
-logging.info("BOT STARTED")
+print("BOT STARTED")
 
 # =========================================================
 # SIMPLE MEMORY CACHE
@@ -360,6 +362,7 @@ def token_age_minutes(timestamp):
 # ANALYTICS ENGINE
 # =========================================================
 
+previous_scores = {}
 
 def analyze_token(data):
 
@@ -439,6 +442,7 @@ def analyze_token(data):
             "url",
             ""
         )
+        #print(f"Age is {age}")
 
         # =================================================
         # FILTERS
@@ -810,7 +814,8 @@ async def ignore_text(
         (
             "⚠ Please use the menu buttons.\n"
             "Use '/help' to access buttons"
-        )
+        ),
+        #reply_markup=main_menu()
     )
     
 # =========================================================
@@ -904,8 +909,9 @@ async def callback_handler(
     		await callback.message.answer(
     			(
     				"❌ Not approved.\n\n"
-    				f"Send ID to "
-    				f"{ADMIN_USERNAME}"
+    				f"Send ID to {ADMIN_USERNAME} to get approved\n"
+    				"*Use the MyID button to retrieve chat id*"
+    				
     			)
     		
     		)
@@ -970,8 +976,6 @@ async def fetch_token(
 # CONCURRENT TOKEN SCANNER
 # =========================================================
 
-REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=20)
-
 async def scan_tokens():
 
     client = DexscreenerClient()
@@ -980,7 +984,7 @@ async def scan_tokens():
         client.get_latest_token_profiles
     )
 
-    async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+    async with aiohttp.ClientSession() as session:
 
         tasks = []
 
@@ -1001,7 +1005,7 @@ async def scan_tokens():
                     profile.token_address
                 )
             )
-            
+
             tasks.append(task)
 
         # MOBILE SAFE LIMIT
@@ -1009,26 +1013,28 @@ async def scan_tokens():
 
         results = await asyncio.gather(
             *tasks,
-            return_exceptions = True
+            return_exceptions=True
         )
-        
+
     cleaned = []
-    
+
     for result in results:
-    	if isinstance(
-    		result,
-    		Exception
-    	):
-    		continue
-    	
-    	if result is not None:
-    		cleaned.append(result)
+
+        if isinstance(
+            result,
+            Exception
+        ):
+            continue
+
+        if result is not None:
+            cleaned.append(result)
 
     return cleaned
 
 # =========================================================
 # ALERT LOOP
 # =========================================================
+
 async def alert_loop():
 
     while True:
@@ -1039,10 +1045,7 @@ async def alert_loop():
 
         try:
 
-            results = await asyncio.wait_for(
-            scan_tokens(),
-            timeout=40
-            )
+            results = await scan_tokens()
 
             results = sorted(
                 results,
@@ -1072,21 +1075,25 @@ async def alert_loop():
                     token
                 )
 
-                await asyncio.gather(
-                	*[
-                		bot.send_message(
-                			user_id,
-                			msg,
-                			reply_markup=token_keyboard(address)
-                		)
-                		for user_id in users
-                	],
-                	return_exceptions = True
-                )
+                for user_id in users:
 
-                       
-        except asyncio.TimeoutError:
-        	logging.warning("Scanner timed out.")
+                    try:
+
+                        await bot.send_message(
+                            user_id,
+                            msg,
+                            reply_markup=(
+                                token_keyboard(
+                                    address
+                                )
+                            )
+                        )
+
+                    except Exception as e:
+
+                        logging.warning(
+                            f"Send error: {e}"
+                        )
 
         except Exception as e:
 
@@ -1102,6 +1109,7 @@ async def alert_loop():
         await asyncio.sleep(
             SCAN_INTERVAL
         )
+
 # =========================================================
 # MAIN
 # =========================================================
