@@ -810,8 +810,7 @@ async def ignore_text(
         (
             "⚠ Please use the menu buttons.\n"
             "Use '/help' to access buttons"
-        ),
-        reply_markup=main_menu()
+        )
     )
     
 # =========================================================
@@ -996,24 +995,36 @@ async def scan_tokens():
             ):
                 continue
 
-            tasks.append(
+            task = asyncio.create_task(
                 fetch_token(
                     session,
                     profile.token_address
                 )
             )
+            
+            tasks.append(task)
 
         # MOBILE SAFE LIMIT
         tasks = tasks[:25]
 
         results = await asyncio.gather(
-            *tasks
+            *tasks,
+            return_exceptions = True
         )
+        
+    cleaned = []
+    
+    for result in results:
+    	if isinstance(
+    		result,
+    		Exception
+    	):
+    		continue
+    	
+    	if result is not None:
+    		cleaned.append(result)
 
-    return [
-        r for r in results
-        if r is not None
-    ]
+    return cleaned
 
 # =========================================================
 # ALERT LOOP
