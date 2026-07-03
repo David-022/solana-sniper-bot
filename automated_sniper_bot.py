@@ -11,6 +11,7 @@ import os
 
 import aiohttp
 import aiosqlite
+import threading
 
 from aiogram import (
     Bot,
